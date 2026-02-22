@@ -1,52 +1,53 @@
-# 🚀 SaaS Project Management Platform
+# SaaS Project Management Tool
 
-A scalable, enterprise-grade **multi-tenant project management system** inspired by tools like Jira, Trello, and Asana.
+Enterprise-oriented multi-tenant project management platform with:
+- ASP.NET Core Web API backend (Clean Architecture style)
+- React + Vite frontend dashboard
 
-Built using **ASP.NET Core Web API** and **React (Vite)**, this platform allows organizations to manage projects, tasks, teams, and workflows in a secure and scalable SaaS environment.
+## Implemented Backend Modules
 
----
+- JWT authentication (`/api/auth/register`, `/api/auth/login`)
+- Multi-tenant isolation by `organizationId` claim
+- Project management (`/api/projects`)
+- Work item management and status flow (`/api/work-items`)
+- Dashboard analytics summary (`/api/dashboard/summary`)
+- Centralized exception handling middleware
+- EF Core SQL Server persistence with startup schema bootstrap
 
-## 🏢 Key Features
+## Implemented Frontend
 
-- 🔐 JWT Authentication & Role-Based Authorization  
-- 🏢 Multi-Tenant Architecture (Organization-based isolation)  
-- 📁 Project & Team Management  
-- 📋 Task & Subtask Tracking  
-- 📊 Kanban Board (Drag & Drop)  
-- 💬 Task Comments & Activity Logs  
-- 🔔 Real-Time Notifications (SignalR)  
-- 🕒 Time Tracking & Reporting  
-- 💳 Subscription & Billing System (SaaS-ready)  
-- 📈 Dashboard & Analytics  
+- Modern auth page (login/register workspace)
+- Dashboard with KPI cards
+- Project and task creation panels
+- Kanban-style status columns with move action
+- API integration for auth/projects/work items/dashboard
 
----
+## Tech Layout
 
-## 🛠 Tech Stack
+- `Backend/` .NET 10 solution with projects:
+  - `SaaS.ProjectManagement.Domain`
+  - `SaaS.ProjectManagement.Application`
+  - `SaaS.ProjectManagement.Infrastructure`
+  - `SaaS.ProjectManagement.API`
+- `Frontend/client/` React + TypeScript + Vite app
 
-### Backend
-- ASP.NET Core Web API  
-- Entity Framework Core  
-- Clean Architecture  
-- SQL Server / PostgreSQL  
-- JWT Authentication  
+## Run Backend
 
-### Frontend
-- React + Vite  
-- Context API / Redux  
-- React DnD (Kanban)  
-- Tailwind CSS / Material UI  
+1. `dotnet build Backend/SaaS.ProjectManagement.slnx -nologo`
+2. `dotnet run --project "Backend/src/SaaS.ProjectManagement.API/SaaS.ProjectManagement.API.csproj"`
 
-### DevOps & Scalability
-- Docker  
-- CI/CD Ready  
-- Structured Logging  
-- Role-Based Access Control (RBAC)  
+Default API URL from launch profile is typically `https://localhost:7068`.
 
----
+## Run Frontend
 
-## 🎯 Project Goals
+1. `cd Frontend/client`
+2. `npm.cmd install`
+3. `npm.cmd run dev`
 
-- Demonstrate enterprise-level system design  
-- Implement multi-tenant SaaS architecture  
-- Practice clean architecture & scalable backend patterns  
-- Build a production-ready, real-world application  
+Set API base URL using env file:
+- `Frontend/client/.env` with `VITE_API_URL=https://localhost:7068`
+
+## Notes
+
+- In development startup, API recreates the DB schema (`EnsureDeleted` + `EnsureCreated`) for a clean local bootstrap.
+- Update `Backend/src/SaaS.ProjectManagement.API/appsettings.json` JWT key and SQL connection for production.
