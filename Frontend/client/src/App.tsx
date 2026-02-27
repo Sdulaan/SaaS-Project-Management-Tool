@@ -110,6 +110,10 @@ function App() {
     }, []);
 
     useEffect(() => {
+        setError('');
+    }, [authMode]);
+
+    useEffect(() => {
         if (!auth) return;
         localStorage.setItem('spm_auth', JSON.stringify(auth));
         void refreshDashboard(auth.token);
@@ -322,7 +326,7 @@ function App() {
                 <div className="auth-card">
                     <h1>Project Orbit</h1>
                     <p>Multi-tenant SaaS workspace for enterprise teams.</p>
-                    <form onSubmit={onAuthSubmit}>
+                    <form onSubmit={onAuthSubmit} key={authMode}>
                         {authMode === 'register' && (
                             <>
                                 <input name="organizationName" placeholder="Organization name" required />

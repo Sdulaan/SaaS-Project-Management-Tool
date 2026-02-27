@@ -3,7 +3,6 @@ using SaaS.ProjectManagement.Application.Abstractions.Persistence;
 using SaaS.ProjectManagement.Application.Abstractions.Security;
 using SaaS.ProjectManagement.Application.Common.Exceptions;
 using SaaS.ProjectManagement.Application.Contracts.Members;
-using SaaS.ProjectManagement.Application.Contracts.WorkItems;
 using SaaS.ProjectManagement.Domain.Entities;
 using SaaS.ProjectManagement.Domain.Enums;
 
@@ -80,49 +79,6 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<MemberResponse> UpdateAssigneeAsync(Guid workItemId, Guid? assigneeId, CancellationToken cancellationToken)
-    {
-        var workItem = await dbContext.WorkItems.FirstOrDefaultAsync(
-            w => w.Id == workItemId && w.OrganizationId == currentUser.OrganizationId,
-            cancellationToken)
-            ?? throw new NotFoundException("Task not found.");
-
-        // Validate assignee exists in organization if provided
-        if (assigneeId.HasValue)
-        {
-            var assigneeExists = await dbContext.Users.AnyAsync(
-                u => u.Id == assigneeId.Value && u.OrganizationId == currentUser.OrganizationId,
-                cancellationToken);
-
-            if (!assigneeExists)
-            {
-                throw new NotFoundException("Member not found.");
-            }
-        }
-
-        workItem.AssigneeId = assigneeId;
-        workItem.UpdatedUtc = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Return updated work item with assignee info
-        var assignee = workItem.AssigneeId.HasValue
-            ? await dbContext.Users.FirstOrDefaultAsync(u => u.Id == workItem.AssigneeId, cancellationToken)
-            : null;
-
-        return new WorkItemResponse(
-            workItem.Id,
-            workItem.ProjectId,
-            workItem.Title,
-            workItem.Description,
-            workItem.Status,
-            workItem.Priority,
-            workItem.AssigneeId,
-            assignee?.FullName,
-            assignee?.Email,
-            workItem.DueDateUtc,
-            workItem.StoryPoints);
-    }
-
     private static string GenerateTemporaryPassword()
     {
         // Generate a 12-character temporary password
@@ -133,3 +89,4 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
             .ToArray());
     }
 }
+
