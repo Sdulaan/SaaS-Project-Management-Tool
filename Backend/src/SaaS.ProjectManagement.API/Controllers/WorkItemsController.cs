@@ -21,4 +21,8 @@ public sealed class WorkItemsController(WorkItemService workItemService) : Contr
     [HttpPatch("{workItemId:guid}/status")]
     public async Task<ActionResult<WorkItemResponse>> UpdateStatus(Guid workItemId, UpdateWorkItemStatusRequest request, CancellationToken cancellationToken)
         => Ok(await workItemService.UpdateStatusAsync(workItemId, request, cancellationToken));
+
+    [HttpPatch("{workItemId:guid}/assignee")]
+    public async Task<ActionResult<WorkItemResponse>> UpdateAssignee(Guid workItemId, UpdateWorkItemAssigneeRequest request, CancellationToken cancellationToken)
+        => Ok(await workItemService.UpdateAssigneeAsync(workItemId, request.AssigneeId, cancellationToken));
 }

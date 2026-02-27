@@ -15,7 +15,10 @@ public sealed class WorkItemService(IAppDbContext dbContext, ICurrentUserContext
             .Where(w => w.ProjectId == projectId && w.OrganizationId == currentUser.OrganizationId)
             .OrderBy(w => w.Status)
             .ThenBy(w => w.Priority)
-            .Select(w => new WorkItemResponse(w.Id, w.ProjectId, w.Title, w.Description, w.Status, w.Priority, w.AssigneeId, w.DueDateUtc, w.StoryPoints))
+            .Select(w => new WorkItemResponse(
+                w.Id, w.ProjectId, w.Title, w.Description, w.Status, w.Priority, w.AssigneeId,
+                w.Assignee != null ? w.Assignee.FullName : null, w.Assignee != null ? w.Assignee.Email : null,
+                w.DueDateUtc, w.StoryPoints))
             .ToListAsync(cancellationToken);
     }
 
@@ -35,6 +38,19 @@ public sealed class WorkItemService(IAppDbContext dbContext, ICurrentUserContext
             throw new NotFoundException("Project not found.");
         }
 
+        // Validate assignee if provided
+        if (request.AssigneeId.HasValue)
+        {
+            var assigneeExists = await dbContext.Users.AnyAsync(
+                u => u.Id == request.AssigneeId.Value && u.OrganizationId == currentUser.OrganizationId,
+                cancellationToken);
+
+            if (!assigneeExists)
+            {
+                throw new NotFoundException("Member not found.");
+            }
+        }
+
         var workItem = new WorkItem
         {
             OrganizationId = currentUser.OrganizationId,
@@ -50,7 +66,20 @@ public sealed class WorkItemService(IAppDbContext dbContext, ICurrentUserContext
         dbContext.WorkItems.Add(workItem);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new WorkItemResponse(workItem.Id, workItem.ProjectId, workItem.Title, workItem.Description, workItem.Status, workItem.Priority, workItem.AssigneeId, workItem.DueDateUtc, workItem.StoryPoints);
+        // Get assignee info if assigned
+        ApplicationUser? assignee = null;
+        if (workItem.AssigneeId.HasValue)
+        {
+            assignee = await dbContext.Users.FirstOrDefaultAsync(
+                u => u.Id == workItem.AssigneeId,
+                cancellationToken);
+        }
+
+        return new WorkItemResponse(
+            workItem.Id, workItem.ProjectId, workItem.Title, workItem.Description,
+            workItem.Status, workItem.Priority, workItem.AssigneeId,
+            assignee?.FullName, assignee?.Email,
+            workItem.DueDateUtc, workItem.StoryPoints);
     }
 
     public async Task<WorkItemResponse> UpdateStatusAsync(Guid workItemId, UpdateWorkItemStatusRequest request, CancellationToken cancellationToken)
@@ -64,6 +93,59 @@ public sealed class WorkItemService(IAppDbContext dbContext, ICurrentUserContext
         workItem.UpdatedUtc = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new WorkItemResponse(workItem.Id, workItem.ProjectId, workItem.Title, workItem.Description, workItem.Status, workItem.Priority, workItem.AssigneeId, workItem.DueDateUtc, workItem.StoryPoints);
+        // Get assignee info if assigned
+        ApplicationUser? assignee = null;
+        if (workItem.AssigneeId.HasValue)
+        {
+            assignee = await dbContext.Users.FirstOrDefaultAsync(
+                u => u.Id == workItem.AssigneeId,
+                cancellationToken);
+        }
+
+        return new WorkItemResponse(
+            workItem.Id, workItem.ProjectId, workItem.Title, workItem.Description,
+            workItem.Status, workItem.Priority, workItem.AssigneeId,
+            assignee?.FullName, assignee?.Email,
+            workItem.DueDateUtc, workItem.StoryPoints);
+    }
+
+    public async Task<WorkItemResponse> UpdateAssigneeAsync(Guid workItemId, Guid? assigneeId, CancellationToken cancellationToken)
+    {
+        var workItem = await dbContext.WorkItems.FirstOrDefaultAsync(
+            w => w.Id == workItemId && w.OrganizationId == currentUser.OrganizationId,
+            cancellationToken)
+            ?? throw new NotFoundException("Task not found.");
+
+        // Validate assignee exists in organization if provided
+        if (assigneeId.HasValue)
+        {
+            var assigneeExists = await dbContext.Users.AnyAsync(
+                u => u.Id == assigneeId.Value && u.OrganizationId == currentUser.OrganizationId,
+                cancellationToken);
+
+            if (!assigneeExists)
+            {
+                throw new NotFoundException("Member not found.");
+            }
+        }
+
+        workItem.AssigneeId = assigneeId;
+        workItem.UpdatedUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Get assignee info if assigned
+        ApplicationUser? assignee = null;
+        if (workItem.AssigneeId.HasValue)
+        {
+            assignee = await dbContext.Users.FirstOrDefaultAsync(
+                u => u.Id == workItem.AssigneeId,
+                cancellationToken);
+        }
+
+        return new WorkItemResponse(
+            workItem.Id, workItem.ProjectId, workItem.Title, workItem.Description,
+            workItem.Status, workItem.Priority, workItem.AssigneeId,
+            assignee?.FullName, assignee?.Email,
+            workItem.DueDateUtc, workItem.StoryPoints);
     }
 }

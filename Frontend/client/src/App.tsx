@@ -30,8 +30,17 @@ type WorkItem = {
     status: number;
     priority: number;
     assigneeId: string | null;
+    assigneeName: string | null;
+    assigneeEmail: string | null;
     dueDateUtc: string | null;
     storyPoints: number;
+};
+
+type Member = {
+    id: string;
+    fullName: string;
+    email: string;
+    role: string;
 };
 
 type DashboardSummary = {
@@ -83,12 +92,17 @@ function App() {
 
     const [showProjectModal, setShowProjectModal] = useState(false);
     const [showTaskModal, setShowTaskModal] = useState(false);
+    const [showMembersModal, setShowMembersModal] = useState(false);
 
     const [projectName, setProjectName] = useState('');
     const [projectDescription, setProjectDescription] = useState('');
     const [taskTitle, setTaskTitle] = useState('');
     const [taskDescription, setTaskDescription] = useState('');
     const [taskPriority, setTaskPriority] = useState(2);
+    const [taskAssigneeId, setTaskAssigneeId] = useState<string>('');
+
+    const [members, setMembers] = useState<Member[]>([]);
+    const [newMemberEmail, setNewMemberEmail] = useState('');
 
     useEffect(() => {
         const cached = localStorage.getItem('spm_auth');
@@ -99,6 +113,7 @@ function App() {
         if (!auth) return;
         localStorage.setItem('spm_auth', JSON.stringify(auth));
         void refreshDashboard(auth.token);
+        void loadMembers(auth.token);
     }, [auth]);
 
     useEffect(() => {
@@ -113,6 +128,7 @@ function App() {
             if (e.key === 'Escape') {
                 setShowProjectModal(false);
                 setShowTaskModal(false);
+                setShowMembersModal(false);
             }
         }
         window.addEventListener('keydown', onKey);
@@ -226,7 +242,7 @@ function App() {
                 projectId: selectedProjectId,
                 title: taskTitle,
                 description: taskDescription || null,
-                assigneeId: null,
+                assigneeId: taskAssigneeId ? taskAssigneeId : null,
                 priority: taskPriority,
                 dueDateUtc: null,
                 storyPoints: 3,
@@ -235,11 +251,54 @@ function App() {
             setTaskTitle('');
             setTaskDescription('');
             setTaskPriority(2);
+            setTaskAssigneeId('');
             setShowTaskModal(false);
             await loadWorkItems(auth.token, selectedProjectId);
             await refreshDashboard(auth.token);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to create task');
+        }
+    }
+
+    async function loadMembers(token: string) {
+        try {
+            const memberList = await api<Member[]>('/api/members', 'GET', undefined, token);
+            setMembers(memberList);
+        } catch (e) {
+            console.error('Failed to load members:', e);
+        }
+    }
+
+    async function onAddMember(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!auth || !newMemberEmail.trim()) return;
+        setError('');
+        try {
+            await api('/api/members', 'POST', { email: newMemberEmail }, auth.token);
+            setNewMemberEmail('');
+            await loadMembers(auth.token);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to add member');
+        }
+    }
+
+    async function onRemoveMember(userId: string) {
+        if (!auth || !confirm('Are you sure you want to remove this member?')) return;
+        try {
+            await api(`/api/members/${userId}`, 'DELETE', undefined, auth.token);
+            await loadMembers(auth.token);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to remove member');
+        }
+    }
+
+    async function updateTaskAssignee(item: WorkItem, newAssigneeId: string | null) {
+        if (!auth) return;
+        try {
+            await api(`/api/work-items/${item.id}/assignee`, 'PATCH', { assigneeId: newAssigneeId || null }, auth.token);
+            await loadWorkItems(auth.token, item.projectId);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to update assignee');
         }
     }
 
@@ -308,6 +367,7 @@ function App() {
                             <p>Focused view of projects, throughput, and delivery risk.</p>
                         </div>
                         <div className="hero-actions">
+                            <button className="btn-outline" onClick={() => setShowMembersModal(true)}>+ Members</button>
                             <button className="btn-outline" onClick={() => setShowProjectModal(true)}>+ New Project</button>
                             <button className="btn-outline" onClick={() => setShowTaskModal(true)}>+ New Task</button>
                         </div>
@@ -363,6 +423,19 @@ function App() {
                                                 <article className="ticket" key={item.id}>
                                                     <h5>{item.title}</h5>
                                                     <p>{item.description || 'No description'}</p>
+                                                    <div style={{ marginBottom: '8px', fontSize: '0.85rem' }}>
+                                                        <strong>Assigned To:</strong>{' '}
+                                                        <select
+                                                            value={item.assigneeId || ''}
+                                                            onChange={(e) => updateTaskAssignee(item, e.target.value || null)}
+                                                            style={{ padding: '4px', marginLeft: '4px' }}
+                                                        >
+                                                            <option value="">Unassigned</option>
+                                                            {members.map((member) => (
+                                                                <option key={member.id} value={member.id}>{member.fullName}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
                                                     <div className="ticket-row">
                                                         <span
                                                             style={{
@@ -416,11 +489,11 @@ function App() {
 
             {/* Create Task Modal */}
             {showTaskModal && (
-                <div className="modal-backdrop" onClick={() => setShowTaskModal(false)}>
+                <div className="modal-backdrop" onClick={() => { setShowTaskModal(false); setTaskAssigneeId(''); }}>
                     <div className="modal" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
                             <h3>Create Task</h3>
-                            <button className="modal-close" onClick={() => setShowTaskModal(false)}>✕</button>
+                            <button className="modal-close" onClick={() => { setShowTaskModal(false); setTaskAssigneeId(''); }}>✕</button>
                         </div>
                         <form onSubmit={onCreateTask}>
                             <select value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
@@ -435,12 +508,80 @@ function App() {
                                     <option key={value} value={value}>{label}</option>
                                 ))}
                             </select>
+                            <select value={taskAssigneeId} onChange={(e) => setTaskAssigneeId(e.target.value)}>
+                                <option value="">Unassigned</option>
+                                {members.map((member) => (
+                                    <option key={member.id} value={member.id}>{member.fullName}</option>
+                                ))}
+                            </select>
                             {error && <div className="error">{error}</div>}
                             <div className="modal-actions">
-                                <button type="button" className="ghost" onClick={() => setShowTaskModal(false)}>Cancel</button>
+                                <button type="button" className="ghost" onClick={() => { setShowTaskModal(false); setTaskAssigneeId(''); }}>Cancel</button>
                                 <button type="submit">Create Task</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Members Modal */}
+            {showMembersModal && (
+                <div className="modal-backdrop" onClick={() => setShowMembersModal(false)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', maxHeight: '600px', overflowY: 'auto' }}>
+                        <div className="modal-header">
+                            <h3>Organization Members</h3>
+                            <button className="modal-close" onClick={() => setShowMembersModal(false)}>✕</button>
+                        </div>
+                        <div style={{ padding: '16px' }}>
+                            <form onSubmit={onAddMember} style={{ marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <input
+                                        type="email"
+                                        value={newMemberEmail}
+                                        onChange={(e) => setNewMemberEmail(e.target.value)}
+                                        placeholder="Email address"
+                                        required
+                                        style={{ flex: 1 }}
+                                    />
+                                    <button type="submit">Add Member</button>
+                                </div>
+                            </form>
+                            {error && <div className="error" style={{ marginBottom: '16px' }}>{error}</div>}
+                            <div>
+                                <h4 style={{ marginTop: 0 }}>Members ({members.length})</h4>
+                                {members.length === 0 ? (
+                                    <p className="muted">No members yet.</p>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {members.map((member) => (
+                                            <div
+                                                key={member.id}
+                                                style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '8px',
+                                                    backgroundColor: '#1a1a2e',
+                                                    borderRadius: '4px',
+                                                }}
+                                            >
+                                                <div>
+                                                    <div style={{ fontWeight: 600 }}>{member.fullName}</div>
+                                                    <div style={{ fontSize: '0.85rem', color: '#888' }}>{member.email}</div>
+                                                </div>
+                                                <button
+                                                    className="ghost"
+                                                    onClick={() => onRemoveMember(member.id)}
+                                                    style={{ color: '#f87171' }}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
