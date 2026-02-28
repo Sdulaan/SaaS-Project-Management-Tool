@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { DragDropContext, Droppable, Draggable, type DropResult } from 'react-beautiful-dnd';
 import './index.css';
 
 type AuthMode = 'login' | 'register';
@@ -20,6 +21,18 @@ type Project = {
     dueDateUtc: string | null;
     totalTasks: number;
     completedTasks: number;
+    isCompleted?: boolean;
+};
+
+type CompletedProject = {
+    id: string;
+    name: string;
+    description: string | null;
+    dueDateUtc: string | null;
+    totalTasks: number;
+    completedTasks: number;
+    memberCount: number;
+    completedAtUtc: string;
 };
 
 type WorkItem = {
@@ -39,6 +52,7 @@ type WorkItem = {
 type Member = {
     id: string;
     fullName: string;
+    displayName: string;
     email: string;
     role: string;
 };
@@ -86,6 +100,8 @@ function App() {
     const [loading, setLoading] = useState(false);
 
     const [projects, setProjects] = useState<Project[]>([]);
+    const [completedProjects, setCompletedProjects] = useState<CompletedProject[]>([]);
+    const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string>('');
     const [workItems, setWorkItems] = useState<WorkItem[]>([]);
@@ -103,6 +119,8 @@ function App() {
 
     const [members, setMembers] = useState<Member[]>([]);
     const [newMemberEmail, setNewMemberEmail] = useState('');
+    const [newMemberName, setNewMemberName] = useState('');
+    const [newMemberDisplayName, setNewMemberDisplayName] = useState('');
 
     useEffect(() => {
         const cached = localStorage.getItem('spm_auth');
@@ -171,12 +189,14 @@ function App() {
     }
 
     async function refreshDashboard(token: string) {
-        const [projectData, summaryData] = await Promise.all([
+        const [projectData, summaryData, completedProjectData] = await Promise.all([
             api<Project[]>('/api/projects', 'GET', undefined, token),
             api<DashboardSummary>('/api/dashboard/summary', 'GET', undefined, token),
+            api<CompletedProject[]>('/api/projects/completed', 'GET', undefined, token),
         ]);
 
         setProjects(projectData);
+        setCompletedProjects(completedProjectData);
         setSummary(summaryData);
 
         if (projectData.length > 0) {
@@ -275,11 +295,13 @@ function App() {
 
     async function onAddMember(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        if (!auth || !newMemberEmail.trim()) return;
+        if (!auth || !newMemberEmail.trim() || !newMemberName.trim() || !newMemberDisplayName.trim()) return;
         setError('');
         try {
-            await api('/api/members', 'POST', { email: newMemberEmail }, auth.token);
+            await api('/api/members', 'POST', { fullName: newMemberName, displayName: newMemberDisplayName, email: newMemberEmail }, auth.token);
             setNewMemberEmail('');
+            setNewMemberName('');
+            setNewMemberDisplayName('');
             await loadMembers(auth.token);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to add member');
@@ -311,6 +333,31 @@ function App() {
         await api(`/api/work-items/${item.id}/status`, 'PATCH', { status: nextStatus }, auth.token);
         await loadWorkItems(auth.token, item.projectId);
         await refreshDashboard(auth.token);
+    }
+
+    async function completeProject(projectId: string) {
+        if (!auth) return;
+        setError('');
+        try {
+            await api(`/api/projects/${projectId}/complete`, 'PATCH', {}, auth.token);
+            await refreshDashboard(auth.token);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to complete project');
+        }
+    }
+
+    async function handleDragEnd(result: DropResult) {
+        const { source, destination, draggableId } = result;
+
+        if (!destination) return;
+        if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+        const newStatus = Number(destination.droppableId);
+        const task = workItems.find((w) => w.id === draggableId);
+
+        if (task) {
+            await moveTask(task, newStatus);
+        }
     }
 
     function handleSelectProject(projectId: string) {
@@ -374,6 +421,15 @@ function App() {
                             <button className="btn-outline" onClick={() => setShowMembersModal(true)}>+ Members</button>
                             <button className="btn-outline" onClick={() => setShowProjectModal(true)}>+ New Project</button>
                             <button className="btn-outline" onClick={() => setShowTaskModal(true)}>+ New Task</button>
+                            {selectedProjectId && !selectedProject?.isCompleted && (
+                                <button
+                                    className="btn-outline"
+                                    onClick={() => completeProject(selectedProjectId)}
+                                    style={{ color: '#4ade80' }}
+                                >
+                                    ✓ Complete Project
+                                </button>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -388,23 +444,73 @@ function App() {
 
                 {/* Projects */}
                 <section className="panel">
-                    <h3>Projects</h3>
-                    {projects.length === 0 ? (
-                        <p className="muted">No projects yet. Click <strong>+ New Project</strong> to get started.</p>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                        <button
+                            className={`btn-outline ${activeTab === 'active' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('active')}
+                            style={{
+                                background: activeTab === 'active' ? '#2a9d8f' : 'transparent',
+                                borderColor: activeTab === 'active' ? '#2a9d8f' : '#444',
+                            }}
+                        >
+                            Active Projects
+                        </button>
+                        <button
+                            className={`btn-outline ${activeTab === 'completed' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('completed')}
+                            style={{
+                                background: activeTab === 'completed' ? '#2a9d8f' : 'transparent',
+                                borderColor: activeTab === 'completed' ? '#2a9d8f' : '#444',
+                            }}
+                        >
+                            Completed Projects ({completedProjects.length})
+                        </button>
+                    </div>
+
+                    {activeTab === 'active' ? (
+                        <>
+                            <h3 style={{ marginTop: 0 }}>Projects</h3>
+                            {projects.length === 0 ? (
+                                <p className="muted">No active projects yet. Click <strong>+ New Project</strong> to get started.</p>
+                            ) : (
+                                <div className="project-list">
+                                    {projects.map((project) => (
+                                        <button
+                                            key={project.id}
+                                            className={`project-btn${project.id === selectedProjectId ? ' project-btn--active' : ''}`}
+                                            onClick={() => handleSelectProject(project.id)}
+                                        >
+                                            <span className="project-btn-name">{project.name}</span>
+                                            <span className="project-btn-desc">{project.description || 'No description'}</span>
+                                            <span className="project-btn-meta">{project.completedTasks}/{project.totalTasks} tasks completed</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </>
                     ) : (
-                        <div className="project-list">
-                            {projects.map((project) => (
-                                <button
-                                    key={project.id}
-                                    className={`project-btn${project.id === selectedProjectId ? ' project-btn--active' : ''}`}
-                                    onClick={() => handleSelectProject(project.id)}
-                                >
-                                    <span className="project-btn-name">{project.name}</span>
-                                    <span className="project-btn-desc">{project.description || 'No description'}</span>
-                                    <span className="project-btn-meta">{project.completedTasks}/{project.totalTasks} tasks completed</span>
-                                </button>
-                            ))}
-                        </div>
+                        <>
+                            <h3 style={{ marginTop: 0 }}>Completed Projects</h3>
+                            {completedProjects.length === 0 ? (
+                                <p className="muted">No completed projects yet. Complete all tasks in a project to mark it as done.</p>
+                            ) : (
+                                <div className="project-list">
+                                    {completedProjects.map((project) => (
+                                        <div
+                                            key={project.id}
+                                            className="project-btn"
+                                            style={{ cursor: 'default', opacity: 0.7 }}
+                                        >
+                                            <span className="project-btn-name">{project.name}</span>
+                                            <span className="project-btn-desc">{project.description || 'No description'}</span>
+                                            <div style={{ fontSize: '0.85rem', color: '#888', marginTop: '4px' }}>
+                                                {project.memberCount} members worked on this • {project.totalTasks} total tasks
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
                     )}
                 </section>
 
@@ -415,57 +521,87 @@ function App() {
                             <h3>{selectedProject?.name} — Board</h3>
                             <span className="kanban-header-meta">{selectedProject?.completedTasks}/{selectedProject?.totalTasks} tasks completed</span>
                         </div>
-                        <div className="kanban">
-                            {columns.map((status) => (
-                                <div className="kanban-column" key={status}>
-                                    <h4>{statusLabels[status]}</h4>
-                                    <div className="kanban-list">
-                                        {(groupedItems.get(status) ?? []).length === 0 ? (
-                                            <p className="muted" style={{ fontSize: '0.85rem', padding: '4px' }}>Empty</p>
-                                        ) : (
-                                            (groupedItems.get(status) ?? []).map((item) => (
-                                                <article className="ticket" key={item.id}>
-                                                    <h5>{item.title}</h5>
-                                                    <p>{item.description || 'No description'}</p>
-                                                    <div style={{ marginBottom: '8px', fontSize: '0.85rem' }}>
-                                                        <strong>Assigned To:</strong>{' '}
-                                                        <select
-                                                            value={item.assigneeId || ''}
-                                                            onChange={(e) => updateTaskAssignee(item, e.target.value || null)}
-                                                            style={{ padding: '4px', marginLeft: '4px' }}
-                                                        >
-                                                            <option value="">Unassigned</option>
-                                                            {members.map((member) => (
-                                                                <option key={member.id} value={member.id}>{member.fullName}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div className="ticket-row">
-                                                        <span
-                                                            style={{
-                                                                background: priorityColors[item.priority] ?? '#888',
-                                                                color: '#000',
-                                                                padding: '2px 8px',
-                                                                borderRadius: '4px',
-                                                                fontSize: '0.75rem',
-                                                                fontWeight: 600,
-                                                            }}
-                                                        >
-                                                            {priorityLabels[item.priority] ?? `P${item.priority}`}
-                                                        </span>
-                                                        <select value={item.status} onChange={(e) => moveTask(item, Number(e.target.value))}>
-                                                            {Object.entries(statusLabels).map(([value, label]) => (
-                                                                <option key={value} value={value}>{label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </article>
-                                            ))
+                        <DragDropContext onDragEnd={handleDragEnd}>
+                            <div className="kanban">
+                                {columns.map((status) => (
+                                    <Droppable key={status} droppableId={String(status)}>
+                                        {(provided, snapshot) => (
+                                            <div
+                                                className="kanban-column"
+                                                ref={provided.innerRef}
+                                                {...provided.droppableProps}
+                                                style={{
+                                                    background: snapshot.isDraggingOver ? '#1f2937' : 'transparent',
+                                                    borderRadius: '4px',
+                                                    transition: 'background 0.2s'
+                                                } as React.CSSProperties}
+                                            >
+                                                <h4>{statusLabels[status]}</h4>
+                                                <div className="kanban-list">
+                                                    {(groupedItems.get(status) ?? []).length === 0 ? (
+                                                        <p className="muted" style={{ fontSize: '0.85rem', padding: '4px' }}>Empty</p>
+                                                    ) : (
+                                                        (groupedItems.get(status) ?? []).map((item, index) => (
+                                                            <Draggable key={item.id} draggableId={item.id} index={index}>
+                                                                {(provided, snapshot) => (
+                                                                    <article
+                                                                        className="ticket"
+                                                                        ref={provided.innerRef}
+                                                                        {...provided.draggableProps}
+                                                                        {...provided.dragHandleProps}
+                                                                        style={{
+                                                                            ...provided.draggableProps.style,
+                                                                            background: snapshot.isDragging ? '#2a2a3e' : '#0f0f1e',
+                                                                            boxShadow: snapshot.isDragging ? '0 4px 12px rgba(0,0,0,0.5)' : 'none',
+                                                                            cursor: snapshot.isDragging ? 'grabbing' : 'grab',
+                                                                        }}
+                                                                    >
+                                                                        <h5>{item.title}</h5>
+                                                                        <p>{item.description || 'No description'}</p>
+                                                                        <div style={{ marginBottom: '8px', fontSize: '0.85rem' }}>
+                                                                            <strong>Assigned To:</strong>{' '}
+                                                                            <select
+                                                                                value={item.assigneeId || ''}
+                                                                                onChange={(e) => updateTaskAssignee(item, e.target.value || null)}
+                                                                                style={{ padding: '4px', marginLeft: '4px' }}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                            >
+                                                                                <option value="">Unassigned</option>
+                                                                                {members.map((member) => (
+                                                                                    <option key={member.id} value={member.id}>{member.displayName}</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                        <div className="ticket-row">
+                                                                            <span
+                                                                                style={{
+                                                                                    background: priorityColors[item.priority] ?? '#888',
+                                                                                    color: '#000',
+                                                                                    padding: '2px 8px',
+                                                                                    borderRadius: '4px',
+                                                                                    fontSize: '0.75rem',
+                                                                                    fontWeight: 600,
+                                                                                }}
+                                                                            >
+                                                                                {priorityLabels[item.priority] ?? `P${item.priority}`}
+                                                                            </span>
+                                                                            <span style={{ fontSize: '0.8rem', color: '#888' }}>
+                                                                                {statusLabels[item.status]}
+                                                                            </span>
+                                                                        </div>
+                                                                    </article>
+                                                                )}
+                                                            </Draggable>
+                                                        ))
+                                                    )}
+                                                    {provided.placeholder}
+                                                </div>
+                                            </div>
                                         )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                                    </Droppable>
+                                ))}
+                            </div>
+                        </DragDropContext>
                     </section>
                 )}
             </main>
@@ -515,7 +651,7 @@ function App() {
                             <select value={taskAssigneeId} onChange={(e) => setTaskAssigneeId(e.target.value)}>
                                 <option value="">Unassigned</option>
                                 {members.map((member) => (
-                                    <option key={member.id} value={member.id}>{member.fullName}</option>
+                                    <option key={member.id} value={member.id}>{member.displayName}</option>
                                 ))}
                             </select>
                             {error && <div className="error">{error}</div>}
@@ -538,6 +674,26 @@ function App() {
                         </div>
                         <div style={{ padding: '16px' }}>
                             <form onSubmit={onAddMember} style={{ marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                    <input
+                                        type="text"
+                                        value={newMemberName}
+                                        onChange={(e) => setNewMemberName(e.target.value)}
+                                        placeholder="Full name"
+                                        required
+                                        style={{ flex: 1 }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                                    <input
+                                        type="text"
+                                        value={newMemberDisplayName}
+                                        onChange={(e) => setNewMemberDisplayName(e.target.value)}
+                                        placeholder="Display name (shown in dropdowns)"
+                                        required
+                                        style={{ flex: 1 }}
+                                    />
+                                </div>
                                 <div style={{ display: 'flex', gap: '8px' }}>
                                     <input
                                         type="email"

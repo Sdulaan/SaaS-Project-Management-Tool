@@ -34,6 +34,7 @@ public sealed class AuthService(IAppDbContext dbContext, IPasswordHasher passwor
         {
             Organization = organization,
             FullName = request.FullName.Trim(),
+            DisplayName = request.FullName.Trim(),
             Email = normalizedEmail,
             PasswordHash = passwordHasher.Hash(request.Password),
             Role = UserRole.Owner

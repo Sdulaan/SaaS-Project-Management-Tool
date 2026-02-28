@@ -15,7 +15,7 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
         return await dbContext.Users
             .Where(u => u.OrganizationId == currentUser.OrganizationId)
             .OrderBy(u => u.FullName)
-            .Select(u => new MemberResponse(u.Id, u.FullName, u.Email, u.Role))
+            .Select(u => new MemberResponse(u.Id, u.FullName, u.DisplayName, u.Email, u.Role))
             .ToListAsync(cancellationToken);
     }
 
@@ -24,6 +24,16 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
         if (string.IsNullOrWhiteSpace(request.Email))
         {
             throw new AppException("Email is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FullName))
+        {
+            throw new AppException("Full name is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            throw new AppException("Display name is required.");
         }
 
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
@@ -44,7 +54,8 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
         var user = new ApplicationUser
         {
             OrganizationId = currentUser.OrganizationId,
-            FullName = normalizedEmail.Split('@')[0], // Use email prefix as default name
+            FullName = request.FullName.Trim(),
+            DisplayName = request.DisplayName.Trim(),
             Email = normalizedEmail,
             PasswordHash = passwordHasher.Hash(temporaryPassword),
             Role = UserRole.Member
@@ -53,7 +64,7 @@ public sealed class MembersService(IAppDbContext dbContext, ICurrentUserContext 
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new MemberResponse(user.Id, user.FullName, user.Email, user.Role);
+        return new MemberResponse(user.Id, user.FullName, user.DisplayName, user.Email, user.Role);
     }
 
     public async Task RemoveMemberAsync(Guid userId, CancellationToken cancellationToken)

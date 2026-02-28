@@ -24,4 +24,12 @@ public sealed class ProjectsController(ProjectService projectService) : Controll
         await projectService.DeleteAsync(projectId, cancellationToken);
         return NoContent();
     }
+
+    [HttpPatch("{projectId:guid}/complete")]
+    public async Task<ActionResult<ProjectResponse>> CompleteProject(Guid projectId, CancellationToken cancellationToken)
+        => Ok(await projectService.CompleteProjectAsync(projectId, cancellationToken));
+
+    [HttpGet("completed")]
+    public async Task<ActionResult<IReadOnlyList<CompletedProjectResponse>>> GetCompleted(CancellationToken cancellationToken)
+        => Ok(await projectService.GetCompletedAsync(cancellationToken));
 }

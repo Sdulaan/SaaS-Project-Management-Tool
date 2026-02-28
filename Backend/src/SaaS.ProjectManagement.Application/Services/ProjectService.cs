@@ -15,7 +15,7 @@ public sealed class ProjectService(IAppDbContext dbContext, ICurrentUserContext 
         var orgId = currentUser.OrganizationId;
 
         return await dbContext.Projects
-            .Where(p => p.OrganizationId == orgId)
+            .Where(p => p.OrganizationId == orgId && !p.IsCompleted)
             .OrderBy(p => p.Name)
             .Select(p => new ProjectResponse(
                 p.Id,
@@ -23,7 +23,8 @@ public sealed class ProjectService(IAppDbContext dbContext, ICurrentUserContext 
                 p.Description,
                 p.DueDateUtc,
                 p.WorkItems.Count,
-                p.WorkItems.Count(w => w.Status == WorkItemStatus.Done)))
+                p.WorkItems.Count(w => w.Status == WorkItemStatus.Done),
+                p.IsCompleted))
             .ToListAsync(cancellationToken);
     }
 
@@ -52,7 +53,7 @@ public sealed class ProjectService(IAppDbContext dbContext, ICurrentUserContext 
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new ProjectResponse(project.Id, project.Name, project.Description, project.DueDateUtc, 0, 0);
+        return new ProjectResponse(project.Id, project.Name, project.Description, project.DueDateUtc, 0, 0, false);
     }
 
     public async Task DeleteAsync(Guid projectId, CancellationToken cancellationToken)
@@ -64,5 +65,61 @@ public sealed class ProjectService(IAppDbContext dbContext, ICurrentUserContext 
 
         dbContext.Projects.Remove(project);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<ProjectResponse> CompleteProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        var project = await dbContext.Projects
+            .Include(p => p.WorkItems)
+            .FirstOrDefaultAsync(
+                p => p.Id == projectId && p.OrganizationId == currentUser.OrganizationId,
+                cancellationToken)
+            ?? throw new NotFoundException("Project not found.");
+
+        var incompleteStatuses = project.WorkItems
+            .Where(w => w.Status != WorkItemStatus.Done)
+            .Select(w => w.Status)
+            .Distinct()
+            .ToList();
+
+        if (incompleteStatuses.Any())
+        {
+            var statusNames = incompleteStatuses
+                .Select(s => Enum.GetName(typeof(WorkItemStatus), s))
+                .ToList();
+            throw new AppException($"Cannot complete project. Not all tasks are finished. Incomplete statuses: {string.Join(", ", statusNames)}");
+        }
+
+        project.IsCompleted = true;
+        project.UpdatedUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new ProjectResponse(
+            project.Id,
+            project.Name,
+            project.Description,
+            project.DueDateUtc,
+            project.WorkItems.Count,
+            project.WorkItems.Count(w => w.Status == WorkItemStatus.Done),
+            project.IsCompleted);
+    }
+
+    public async Task<IReadOnlyList<CompletedProjectResponse>> GetCompletedAsync(CancellationToken cancellationToken)
+    {
+        var orgId = currentUser.OrganizationId;
+
+        return await dbContext.Projects
+            .Where(p => p.OrganizationId == orgId && p.IsCompleted)
+            .OrderByDescending(p => p.UpdatedUtc)
+            .Select(p => new CompletedProjectResponse(
+                p.Id,
+                p.Name,
+                p.Description,
+                p.DueDateUtc,
+                p.WorkItems.Count,
+                p.WorkItems.Count(w => w.Status == WorkItemStatus.Done),
+                p.WorkItems.Where(w => w.AssigneeId.HasValue).Select(w => w.AssigneeId).Distinct().Count(),
+                p.UpdatedUtc!.Value))
+            .ToListAsync(cancellationToken);
     }
 }
